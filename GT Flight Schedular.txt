@@ -1,9 +1,315 @@
-@router.get('/products')
-def get_all_products(db=Depends(get_db)):
-    products = db.execute('SELECT * FROM Product').fetchall()
-    if not products:
-        raise HTTPException(status_code=404, detail="No products found")
-    return {
-        "products": [dict(product) for product in products]
-    }
-how can i return this as per your js and also in js you will show wverything when user enters promo code ok 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Product List</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Product List</h1>
+
+    <label for="countrySelect">Select Country Code:</label>
+    <select id="countrySelect">
+      <option value="">-- Select --</option>
+    </select>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Code</th><th>Category</th><th>Image</th><th>Price</th>
+          <th>Available</th><th>Promo Code</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="productBody"></tbody>
+    </table>
+
+    <h2>Add New Product</h2>
+    <form id="addProductForm">
+      <input type="text" name="Name" placeholder="Name" required>
+      <input type="text" name="Code" placeholder="Code" required>
+      <input type="text" name="Category" placeholder="Category" required>
+      <input type="text" name="ImageUrl" placeholder="Image URL" required>
+      <input type="number" name="Price" placeholder="Price" required>
+      <input type="text" name="AvailableCountryCodes" placeholder="Country Codes e.g. 1,2" required>
+      <button type="submit">Add Product</button>
+    </form>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="editModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close" onclick="closeModal()">&times;</span>
+      <h3>Edit Product</h3>
+      <form id="editProductForm">
+        <input type="hidden" name="Code" id="editCode">
+        <input type="text" name="Name" id="editName" placeholder="Name" required>
+        <input type="text" name="Category" id="editCategory" placeholder="Category">
+        <input type="text" name="ImageUrl" id="editImageUrl" placeholder="Image URL">
+        <input type="number" name="Price" id="editPrice" placeholder="Price" required>
+        <input type="text" name="PromoCode" id="editPromoCode" placeholder="Promo Code">
+        <input type="number" name="Discount" id="editDiscount" placeholder="Discount">
+        <input type="text" name="DiscountType" id="editDiscountType" placeholder="Discount Type">
+        <input type="text" name="AvailableCountryCodes" id="editAvailableCountryCodes" placeholder="Country Codes" required>
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/script.js"></script>
+</body>
+</html>
+body {
+  font-family: Arial;
+  background: #f5f5f5;
+  padding: 20px;
+}
+.container {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+th, td {
+  padding: 10px;
+  border: 1px solid #ddd;
+}
+img {
+  width: 60px;
+}
+button {
+  margin: 3px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+form input {
+  margin: 5px;
+  padding: 8px;
+  width: 200px;
+}
+.modal {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; justify-content: center; align-items: center;
+}
+.modal.hidden {
+  display: none;
+}
+.modal-content {
+  background: white;
+  padding: 20px;
+  width: 400px;
+  border-radius: 10px;
+  position: relative;
+}
+.modal-content input {
+  display: block;
+  margin: 10px 0;
+  padding: 8px;
+  width: 100%;
+}
+.close {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  font-size: 20px;
+  cursor: pointer;
+
+
+let allProducts = [];
+
+document.addEventListener("DOMContentLoaded", async () => {
+  await fetchProducts();
+  document.getElementById("countrySelect").addEventListener("change", renderProducts);
+  document.getElementById("addProductForm").addEventListener("submit", addProduct);
+  document.getElementById("editProductForm").addEventListener("submit", submitEditForm);
+});
+
+async function fetchProducts() {
+  const res = await fetch("/api/v1/products");
+  allProducts = await res.json();
+  populateCountryDropdown();
+  renderProducts();
+}
+
+function populateCountryDropdown() {
+  const dropdown = document.getElementById("countrySelect");
+  const codes = new Set();
+  allProducts.forEach(p => {
+    p.AvailableCountryCodes.split(",").forEach(code => codes.add(code.trim()));
+  });
+  dropdown.innerHTML = '<option value="">-- Select --</option>';
+  [...codes].sort().forEach(code => {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = code;
+    dropdown.appendChild(opt);
+  });
+}
+
+function renderProducts() {
+  const tbody = document.getElementById("productBody");
+  const selected = document.getElementById("countrySelect").value;
+  tbody.innerHTML = "";
+
+  if (!selected) {
+    tbody.innerHTML = "<tr><td colspan='8'>Please select a country code.</td></tr>";
+    return;
+  }
+
+  const filtered = allProducts.filter(p => 
+    p.AvailableCountryCodes.split(",").map(c => c.trim()).includes(selected)
+  );
+
+  if (!filtered.length) {
+    tbody.innerHTML = "<tr><td colspan='8'>No products available for selected country.</td></tr>";
+    return;
+  }
+
+  filtered.forEach(p => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${p.Name}</td>
+      <td>${p.Code}</td>
+      <td>${p.Category}</td>
+      <td><img src="${p.ImageUrl}"></td>
+      <td>${p.Price}</td>
+      <td>${p.IsAvailable ? "Yes" : "No"}</td>
+      <td>${p.PromoCode || "N/A"}</td>
+      <td>
+        <button onclick="editProduct('${p.Code}')">Edit</button>
+        <button onclick="orderProduct('${p.Code}')">Order</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function addProduct(e) {
+  e.preventDefault();
+  const form = e.target;
+  const formData = new FormData(form);
+  const data = Object.fromEntries(formData.entries());
+  data.Price = parseInt(data.Price);
+  data.IsAvailable = true;
+
+  const res = await fetch("/api/v1/add_product", {
+    method: "POST",
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+
+  if (res.ok) {
+    form.reset();
+    await fetchProducts();
+  } else {
+    alert("Add failed");
+  }
+}
+
+function editProduct(code) {
+  const product = allProducts.find(p => p.Code === code);
+  if (!product) return;
+
+  const fields = [
+    "Code", "Name", "Category", "ImageUrl", "Price", "PromoCode", 
+    "Discount", "DiscountType", "AvailableCountryCodes"
+  ];
+
+  fields.forEach(id => {
+    document.getElementById("edit" + id).value = product[id] || "";
+  });
+
+  document.getElementById("editModal").classList.remove("hidden");
+}
+
+function closeModal() {
+  document.getElementById("editModal").classList.add("hidden");
+}
+
+async function submitEditForm(e) {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const data = Object.fromEntries(formData.entries());
+  data.Price = parseInt(data.Price);
+  if (data.Discount) data.Discount = parseInt(data.Discount);
+
+  const res = await fetch("/api/v1/update_product", {
+    method: "POST",
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+
+  if (res.ok) {
+    closeModal();
+    await fetchProducts();
+  } else {
+    alert("Update failed");
+  }
+}
+
+function orderProduct(code) {
+  window.location.href = `/checkout/${code}`;
+}
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional, List
+
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+class Product(BaseModel):
+    Name: str
+    Code: str
+    Category: str
+    ImageUrl: str
+    IsAvailable: bool
+    Description: Optional[str] = ""
+    Price: int
+    PromoCode: Optional[str] = None
+    Discount: Optional[int] = None
+    DiscountType: str = "percent"
+    MarkUP: Optional[int] = None
+    MarkUpType: str = "percent"
+    MaxQuantityForMarkUP: Optional[int] = None
+    MaxDiscountAmount: Optional[int] = None
+    DiscountValidFrom: Optional[str] = None
+    DiscountValidTill: Optional[str] = None
+    MarkUpValidFrom: Optional[str] = None
+    MarkUpValidTill: Optional[str] = None
+    AvailableCountryCodes: str
+
+products_db: List[Product] = []
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    with open("product_list.html") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/api/v1/products")
+def get_all_products():
+    return [product.dict() for product in products_db]
+
+@app.post("/api/v1/add_product")
+def add_product(product: Product):
+    products_db.append(product)
+    return {"message": "Product added"}
+
+@app.post("/api/v1/update_product")
+def update_product(update: dict):
+    code = update.get("Code")
+    for i, p in enumerate(products_db):
+        if p.Code == code:
+            updated = p.dict()
+            updated.update(update)
+            products_db[i] = Product(**updated)
+            return {"message": "Product updated"}
+    raise HTTPException(status_code=404, detail="Product not found")
