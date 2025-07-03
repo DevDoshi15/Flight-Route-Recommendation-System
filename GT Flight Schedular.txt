@@ -1,8 +1,158 @@
-Now i want product_details page where requirements are it should display product name , markup and discount , discount should only be visible when user enters promo code and it matches with my promo code so one api endpoint for getting all the details of product that is not related to discount and markup and  with promocode and one endpoint for verifying that and bringing every possible details of product  
- 
- 
- 
-you are hitting currently at /checkout/Code for detail endpoint  so router = APIRouter()
- 
-@router.post('/checkout/Code')
- follow this format and give code
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+router = APIRouter()
+
+# Get basic details (no discount/markup)
+@router.post('/checkout/{code}')
+def get_product_basic(code: str):
+    for product in products_db:
+        if product.Code == code:
+            return {
+                "Name": product.Name,
+                "Price": product.Price,
+                "ImageUrl": product.ImageUrl,
+                "MarkUP": product.MarkUP,
+                "MarkUpType": product.MarkUpType
+            }
+    raise HTTPException(status_code=404, detail="Product not found")
+
+# Schema for promo verification
+class PromoVerify(BaseModel):
+    Code: str
+    PromoCode: str
+
+# Verify promo code and return full product details
+@router.post('/checkout/verify')
+def verify_promo(data: PromoVerify):
+    for product in products_db:
+        if product.Code == data.Code:
+            if product.PromoCode and product.PromoCode == data.PromoCode:
+                return {
+                    "Name": product.Name,
+                    "Price": product.Price,
+                    "ImageUrl": product.ImageUrl,
+                    "MarkUP": product.MarkUP,
+                    "MarkUpType": product.MarkUpType,
+                    "Discount": product.Discount,
+                    "DiscountType": product.DiscountType,
+                    "PromoCode": product.PromoCode
+                }
+            else:
+                raise HTTPException(status_code=400, detail="Invalid promo code")
+    raise HTTPException(status_code=404, detail="Product not found")
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Product Details</title>
+  <link rel="stylesheet" href="/static/product_details.css">
+</head>
+<body>
+  <div class="container">
+    <h1 id="productName">Loading...</h1>
+    <img id="productImage" src="" alt="" style="width:200px"><br>
+    <p>Price: ₹<span id="price"></span></p>
+    <p>MarkUp: <span id="markup"></span> <span id="markupType"></span></p>
+
+    <div id="discountSection" class="hidden">
+      <p>Discount: <span id="discount"></span> <span id="discountType"></span></p>
+    </div>
+
+    <form id="promoForm">
+      <input type="text" id="promoInput" placeholder="Enter promo code">
+      <button type="submit">Apply</button>
+    </form>
+
+    <p id="promoError" class="error"></p>
+  </div>
+
+  <script src="/static/product_details.js"></script>
+</body>
+</html>
+body {
+  font-family: Arial;
+  background-color: #f9f9f9;
+  padding: 30px;
+}
+
+.container {
+  background-color: white;
+  max-width: 500px;
+  padding: 20px;
+  margin: auto;
+  border-radius: 12px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.hidden {
+  display: none;
+}
+
+form {
+  margin-top: 20px;
+}
+
+input[type="text"] {
+  padding: 8px;
+  width: 70%;
+  margin-right: 10px;
+}
+
+button {
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.error {
+  color: red;
+  margin-top: 10px;
+}
+const code = window.location.pathname.split('/').pop();
+
+async function loadProduct() {
+  const res = await fetch(`/checkout/${code}`, { method: "POST" });
+  if (!res.ok) {
+    alert("Product not found");
+    return;
+  }
+
+  const product = await res.json();
+  document.getElementById("productName").innerText = product.Name;
+  document.getElementById("price").innerText = product.Price;
+  document.getElementById("markup").innerText = product.MarkUP ?? "N/A";
+  document.getElementById("markupType").innerText = product.MarkUpType ?? "";
+  document.getElementById("productImage").src = product.ImageUrl;
+}
+
+document.getElementById("promoForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const promoCode = document.getElementById("promoInput").value;
+
+  const res = await fetch("/checkout/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Code: code, PromoCode: promoCode })
+  });
+
+  if (res.ok) {
+    const data = await res.json();
+    document.getElementById("discount").innerText = data.Discount;
+    document.getElementById("discountType").innerText = data.DiscountType;
+    document.getElementById("discountSection").classList.remove("hidden");
+    document.getElementById("promoError").innerText = "";
+  } else {
+    document.getElementById("promoError").innerText = "Invalid Promo Code";
+  }
+});
+
+loadProduct();
