@@ -1,46 +1,60 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+import sqlite3
+from typing import Annotated
 
 router = APIRouter()
 
-# Get basic details (no discount/markup)
-@router.post('/checkout/{code}')
-def get_product_basic(code: str):
-    for product in products_db:
-        if product.Code == code:
-            return {
-                "Name": product.Name,
-                "Price": product.Price,
-                "ImageUrl": product.ImageUrl,
-                "MarkUP": product.MarkUP,
-                "MarkUpType": product.MarkUpType
-            }
-    raise HTTPException(status_code=404, detail="Product not found")
+# Dependency
+def get_db():
+    conn = sqlite3.connect("products.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
 
-# Schema for promo verification
+# Request body for promo verification
 class PromoVerify(BaseModel):
     Code: str
     PromoCode: str
 
-# Verify promo code and return full product details
-@router.post('/checkout/verify')
-def verify_promo(data: PromoVerify):
-    for product in products_db:
-        if product.Code == data.Code:
-            if product.PromoCode and product.PromoCode == data.PromoCode:
-                return {
-                    "Name": product.Name,
-                    "Price": product.Price,
-                    "ImageUrl": product.ImageUrl,
-                    "MarkUP": product.MarkUP,
-                    "MarkUpType": product.MarkUpType,
-                    "Discount": product.Discount,
-                    "DiscountType": product.DiscountType,
-                    "PromoCode": product.PromoCode
-                }
-            else:
-                raise HTTPException(status_code=400, detail="Invalid promo code")
-    raise HTTPException(status_code=404, detail="Product not found")
+# Get basic product details (excluding discount)
+@router.post("/checkout/{code}")
+def get_product_basic(code: str, db: Annotated[sqlite3.Connection, Depends(get_db)]):
+    product = db.execute("SELECT * FROM Product WHERE Code = ?", (code,)).fetchone()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return {
+        "Name": product["Name"],
+        "Price": product["Price"],
+        "ImageUrl": product["ImageUrl"],
+        "MarkUP": product["MarkUP"],
+        "MarkUpType": product["MarkUpType"],
+        "MarkUpValidFrom": product["MarkUpValidFrom"],
+        "MarkUpValidTill": product["MarkUpValidTill"],
+        "DiscountValidFrom": product["DiscountValidFrom"],
+        "DiscountValidTill": product["DiscountValidTill"]
+    }
+
+# Verify promo code and return full discount info
+@router.post("/checkout/verify")
+def verify_promo(data: PromoVerify, db: Annotated[sqlite3.Connection, Depends(get_db)]):
+    product = db.execute("SELECT * FROM Product WHERE Code = ?", (data.Code,)).fetchone()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    if product["PromoCode"] != data.PromoCode:
+        raise HTTPException(status_code=400, detail="Invalid promo code")
+
+    return {
+        "Name": product["Name"],
+        "Price": product["Price"],
+        "ImageUrl": product["ImageUrl"],
+        "Discount": product["Discount"],
+        "DiscountType": product["DiscountType"],
+        "MaxDiscountAmount": product["MaxDiscountAmount"]
+    }
 
 <!DOCTYPE html>
 <html lang="en">
@@ -52,72 +66,81 @@ def verify_promo(data: PromoVerify):
 <body>
   <div class="container">
     <h1 id="productName">Loading...</h1>
-    <img id="productImage" src="" alt="" style="width:200px"><br>
+    <img id="productImage" src="" alt="Product Image"><br>
+    
     <p>Price: ₹<span id="price"></span></p>
     <p>MarkUp: <span id="markup"></span> <span id="markupType"></span></p>
+    <p>MarkUp Valid: <span id="markupFrom"></span> to <span id="markupTill"></span></p>
+    <p>Discount Valid: <span id="discountFrom"></span> to <span id="discountTill"></span></p>
+
+    <form id="promoForm">
+      <input type="text" id="promoInput" placeholder="Enter promo code" required>
+      <button type="submit">Apply</button>
+    </form>
+    <p id="promoError" class="error"></p>
 
     <div id="discountSection" class="hidden">
       <p>Discount: <span id="discount"></span> <span id="discountType"></span></p>
+      <p>Max Discount: ₹<span id="maxDiscount"></span></p>
+      <p><strong>Final Price: ₹<span id="finalPrice"></span></strong></p>
     </div>
-
-    <form id="promoForm">
-      <input type="text" id="promoInput" placeholder="Enter promo code">
-      <button type="submit">Apply</button>
-    </form>
-
-    <p id="promoError" class="error"></p>
   </div>
 
   <script src="/static/product_details.js"></script>
 </body>
 </html>
 body {
-  font-family: Arial;
-  background-color: #f9f9f9;
+  font-family: Arial, sans-serif;
+  background-color: #f5f5f5;
   padding: 30px;
 }
 
 .container {
   background-color: white;
   max-width: 500px;
-  padding: 20px;
+  padding: 25px;
   margin: auto;
-  border-radius: 12px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
 }
 
 img {
-  max-width: 100%;
-  height: auto;
+  width: 100%;
+  max-width: 300px;
+  margin: 10px 0;
+  border-radius: 10px;
   border: 1px solid #ccc;
-  border-radius: 8px;
-  margin-top: 10px;
+}
+
+input[type="text"] {
+  padding: 8px;
+  width: 70%;
+  margin-right: 8px;
+}
+
+button {
+  padding: 8px 14px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #0056b3;
 }
 
 .hidden {
   display: none;
 }
 
-form {
-  margin-top: 20px;
-}
-
-input[type="text"] {
-  padding: 8px;
-  width: 70%;
-  margin-right: 10px;
-}
-
-button {
-  padding: 8px 16px;
-  cursor: pointer;
-}
-
 .error {
   color: red;
-  margin-top: 10px;
+  margin-top: 8px;
 }
+
 const code = window.location.pathname.split('/').pop();
+let productBasePrice = 0;
 
 async function loadProduct() {
   const res = await fetch(`/checkout/${code}`, { method: "POST" });
@@ -129,9 +152,15 @@ async function loadProduct() {
   const product = await res.json();
   document.getElementById("productName").innerText = product.Name;
   document.getElementById("price").innerText = product.Price;
+  productBasePrice = product.Price;
   document.getElementById("markup").innerText = product.MarkUP ?? "N/A";
   document.getElementById("markupType").innerText = product.MarkUpType ?? "";
-  document.getElementById("productImage").src = product.ImageUrl;
+  document.getElementById("productImage").src = product.ImageUrl || "";
+
+  document.getElementById("markupFrom").innerText = product.MarkUpValidFrom || "N/A";
+  document.getElementById("markupTill").innerText = product.MarkUpValidTill || "N/A";
+  document.getElementById("discountFrom").innerText = product.DiscountValidFrom || "N/A";
+  document.getElementById("discountTill").innerText = product.DiscountValidTill || "N/A";
 }
 
 document.getElementById("promoForm").addEventListener("submit", async (e) => {
@@ -148,8 +177,24 @@ document.getElementById("promoForm").addEventListener("submit", async (e) => {
     const data = await res.json();
     document.getElementById("discount").innerText = data.Discount;
     document.getElementById("discountType").innerText = data.DiscountType;
+    document.getElementById("maxDiscount").innerText = data.MaxDiscountAmount ?? "N/A";
     document.getElementById("discountSection").classList.remove("hidden");
     document.getElementById("promoError").innerText = "";
+
+    // Calculate final price
+    let discountAmt = 0;
+    if (data.DiscountType === "percent") {
+      discountAmt = (productBasePrice * data.Discount) / 100;
+    } else if (data.DiscountType === "flat") {
+      discountAmt = data.Discount;
+    }
+
+    if (data.MaxDiscountAmount !== null && discountAmt > data.MaxDiscountAmount) {
+      discountAmt = data.MaxDiscountAmount;
+    }
+
+    const finalPrice = productBasePrice - discountAmt;
+    document.getElementById("finalPrice").innerText = Math.round(finalPrice);
   } else {
     document.getElementById("promoError").innerText = "Invalid Promo Code";
   }
