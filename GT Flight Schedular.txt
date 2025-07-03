@@ -1,9 +1,8 @@
-
-from fastapi import APIRouter, HTTPException,Depends
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from app.database.session import get_db
+from app.database.session import get_db  # Adjust path as needed
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1")
 
 class PromoVerify(BaseModel):
     Code: str
@@ -12,7 +11,6 @@ class PromoVerify(BaseModel):
 @router.get("/checkout/{code}")
 def get_product_basic(code: str, db = Depends(get_db)):
     product = db.execute("SELECT * FROM Product WHERE Code = ?", (code,)).fetchone()
-    print(product)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return {
@@ -25,6 +23,7 @@ def get_product_basic(code: str, db = Depends(get_db)):
         "MarkUpValidTill": product[18],
         "DiscountValidFrom": product[15],
         "DiscountValidTill": product[16],
+        "MaxQuantityForMarkUP": product[13]
     }
 
 @router.post("/checkout/verify")
@@ -32,41 +31,137 @@ def verify_promo(data: PromoVerify, db = Depends(get_db)):
     product = db.execute("SELECT * FROM Product WHERE Code = ?", (data.Code,)).fetchone()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    
     if product[8] != data.PromoCode:
         raise HTTPException(status_code=400, detail="Invalid promo code")
-
     return {
         "Name": product[1],
         "Price": product[7],
         "ImageUrl": product[4],
         "Discount": product[9],
         "DiscountType": product[10],
-        "MaxDiscountAmount": product[14],
+        "MaxDiscountAmount": product[14]
     }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Product Details</title>
+  <link rel="stylesheet" href="/static/product_details.css">
+</head>
+<body>
+  <div class="container">
+    <h1 id="productName">Loading...</h1>
+    <img id="productImage" src="" alt="Product Image"><br>
 
-i this code send markup value as well and in const code = window.location.pathname.split('/').pop();
+    <p>Price per unit: ₹<span id="price"></span></p>
+    <p>MarkUp: <span id="markup"></span> <span id="markupType"></span></p>
+    <p>MarkUp Valid: <span id="markupFrom"></span> to <span id="markupTill"></span></p>
+    <p>Discount Valid: <span id="discountFrom"></span> to <span id="discountTill"></span></p>
+
+    <label for="quantityInput">Quantity:</label>
+    <input type="number" id="quantityInput" value="1" min="1" />
+
+    <form id="promoForm">
+      <input type="text" id="promoInput" placeholder="Enter promo code">
+      <button type="submit">Apply</button>
+    </form>
+    <p id="promoError" class="error"></p>
+
+    <div id="discountSection" class="hidden">
+      <p>Discount: <span id="discount"></span> <span id="discountType"></span></p>
+      <p>Max Discount: ₹<span id="maxDiscount"></span></p>
+      <p><strong>Final Price: ₹<span id="finalPrice"></span></strong></p>
+    </div>
+  </div>
+
+  <script src="/static/product_details.js"></script>
+</body>
+</html>
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f9f9f9;
+  padding: 30px;
+}
+
+.container {
+  background-color: #fff;
+  max-width: 500px;
+  padding: 25px;
+  margin: auto;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+img {
+  width: 100%;
+  max-width: 300px;
+  border-radius: 10px;
+  margin-bottom: 15px;
+}
+
+input[type="text"], input[type="number"] {
+  padding: 8px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  width: 70%;
+}
+
+button {
+  padding: 8px 16px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #0056b3;
+}
+
+.hidden {
+  display: none;
+}
+
+.error {
+  color: red;
+  margin-top: 10px;
+}
+
+const code = window.location.pathname.split('/').pop();
 let productBasePrice = 0;
+let markUp = 0;
+let markUpType = "";
+let maxMarkupQty = null;
+let discountData = null;
+
+const quantityInput = document.getElementById("quantityInput");
 
 async function loadProduct() {
-  const res = await fetch(`/api/v1/checkout/${code}`); 
+  const res = await fetch(`/api/v1/checkout/${code}`);
   if (!res.ok) {
     alert("Product not found");
     return;
   }
- 
+
   const product = await res.json();
   document.getElementById("productName").innerText = product.Name;
   document.getElementById("price").innerText = product.Price;
   productBasePrice = product.Price;
-  document.getElementById("markup").innerText = product.MarkUP ?? "N/A";
-  document.getElementById("markupType").innerText = product.MarkUpType ?? "";
+  markUp = product.MarkUP ?? 0;
+  markUpType = product.MarkUpType ?? "";
+  maxMarkupQty = product.MaxQuantityForMarkUP;
+
+  document.getElementById("markup").innerText = markUp;
+  document.getElementById("markupType").innerText = markUpType;
   document.getElementById("productImage").src = product.ImageUrl || "";
- 
+
   document.getElementById("markupFrom").innerText = product.MarkUpValidFrom || "N/A";
   document.getElementById("markupTill").innerText = product.MarkUpValidTill || "N/A";
   document.getElementById("discountFrom").innerText = product.DiscountValidFrom || "N/A";
   document.getElementById("discountTill").innerText = product.DiscountValidTill || "N/A";
+
+  calculateFinalPrice();
 }
 
 document.getElementById("promoForm").addEventListener("submit", async (e) => {
@@ -80,32 +175,53 @@ document.getElementById("promoForm").addEventListener("submit", async (e) => {
   });
 
   if (res.ok) {
-    const data = await res.json();
-    document.getElementById("discount").innerText = data.Discount;
-    document.getElementById("discountType").innerText = data.DiscountType;
-    document.getElementById("maxDiscount").innerText = data.MaxDiscountAmount ?? "N/A";
+    discountData = await res.json();
+    document.getElementById("discount").innerText = discountData.Discount;
+    document.getElementById("discountType").innerText = discountData.DiscountType;
+    document.getElementById("maxDiscount").innerText = discountData.MaxDiscountAmount ?? "N/A";
     document.getElementById("discountSection").classList.remove("hidden");
     document.getElementById("promoError").innerText = "";
-
-
-    let discountAmt = 0;
-    if (data.DiscountType === "Percentage") {
-      discountAmt = (productBasePrice * data.Discount) / 100;
-    } else if (data.DiscountType === "FixedAmount") {
-      discountAmt = data.Discount;
-    }
-
-    if (data.MaxDiscountAmount !== null && discountAmt > data.MaxDiscountAmount) {
-      discountAmt = data.MaxDiscountAmount;
-    }
-
-    
-
-    const finalPrice = productBasePrice - discountAmt;
-    document.getElementById("finalPrice").innerText = Math.round(finalPrice);
+    calculateFinalPrice();
   } else {
     document.getElementById("promoError").innerText = "Invalid Promo Code";
   }
 });
 
-loadProduct(); in this javascript file get markup also in html one but should aslo be for quantity if quantity is greater tan the markupquantity no cmiision else markup amount shoul be added to original price and then do your calc
+quantityInput.addEventListener("input", () => {
+  calculateFinalPrice();
+});
+
+function calculateFinalPrice() {
+  const qty = parseInt(quantityInput.value) || 1;
+  let totalPrice = productBasePrice * qty;
+
+  if (maxMarkupQty !== null && qty <= maxMarkupQty) {
+    if (markUpType === "Percentage") {
+      totalPrice += (totalPrice * markUp) / 100;
+    } else if (markUpType === "FixedAmount") {
+      totalPrice += markUp * qty;
+    }
+  }
+
+  if (discountData) {
+    let discountAmt = 0;
+    if (discountData.DiscountType === "Percentage") {
+      discountAmt = (totalPrice * discountData.Discount) / 100;
+    } else if (discountData.DiscountType === "FixedAmount") {
+      discountAmt = discountData.Discount * qty;
+    }
+
+    if (
+      discountData.MaxDiscountAmount !== null &&
+      discountAmt > discountData.MaxDiscountAmount
+    ) {
+      discountAmt = discountData.MaxDiscountAmount;
+    }
+
+    totalPrice -= discountAmt;
+  }
+
+  document.getElementById("finalPrice").innerText = Math.round(totalPrice);
+}
+
+loadProduct();
